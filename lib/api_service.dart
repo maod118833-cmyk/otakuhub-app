@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'api_service.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 void main() {
   runApp(const OtakuHubApp());
@@ -27,91 +28,117 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool isLoading = false;
-  Map<String, dynamic>? episodeData;
-  String? errorMessage;
+  late Future<List<dynamic>> _dataFuture;
 
-  final TextEditingController animeController = TextEditingController(text: 'one-piece');
-  final TextEditingController episodeController = TextEditingController(text: '1');
+  @override
+  void initState() {
+    super.initState();
+    _dataFuture = fetchData();
+  }
 
-  Future<void> loadEpisode() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
+  // دالة جلب البيانات مع رابط Render الخاص بك ومعالجة الأخطاء
+  Future<List<dynamic>> fetchData() async {
+    try {
+      final response = await http
+          .get(Uri.parse('https://anime-17dj.onrender.com/'))
+          .timeout(const Duration(seconds: 10));
 
-    final data = await ApiService.fetchServers(
-      anime: animeController.text.trim(),
-      episode: episodeController.text.trim(),
-    );
-
-    setState(() {
-      isLoading = false;
-      if (data != null) {
-        episodeData = data;
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is List) {
+          return data;
+        } else {
+          return [data];
+        }
       } else {
-        errorMessage = 'فشل في جلب البيانات، تأكد من اسم الأنمي أو رقم الحلقة.';
+        throw Exception(
+            'HTTP Error ${response.statusCode}: ${response.reasonPhrase}');
       }
-    });
+    } catch (e) {
+      throw Exception('فشل الاتصال بالسيرفر:\n$e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('OtakuHub 🍿'),
+        title: const Text('OtakuHub'),
         centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            TextField(
-              controller: animeController,
-              decoration: const InputDecoration(
-                labelText: 'اسم الأنمي (مثل: one-piece)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: episodeController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'رقم الحلقة',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 15),
-            ElevatedButton(
-              onPressed: isLoading ? null : loadEpisode,
-              child: const Text('جلب السيرفرات 🚀'),
-            ),
-            const SizedBox(height: 20),
-            if (isLoading)
-              const CircularProgressIndicator()
-            else if (errorMessage != null)
-              Text(errorMessage!, style: const TextStyle(color: Colors.red))
-            else if (episodeData != null)
-              Expanded(
-                child: ListView(
+      body: FutureBuilder<List<dynamic>>(
+        future: _dataFuture,
+        builder: (context, snapshot) {
+          // 1. حالة الانتظار (دائرة التحميل)
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          // 2. حالة حدوث خطأ (عرض رسالة الخطأ)
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      'النتائج:',
-                      style: Theme.of(context).textTheme.titleMedium,
+                    const Icon(
+                      Icons.error_outline,
+                      color: Colors.redAccent,
+                      size: 60,
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'حدث خطأ أثناء تحميل البيانات:',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     SelectableText(
-                      episodeData.toString(),
-                      style: const TextStyle(fontSize: 14),
+                      '${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _dataFuture = fetchData();
+                        });
+                      },
+                      child: const Text('إعادة المحاولة'),
                     ),
                   ],
                 ),
-              )
-            else
-              const Text('أدخل التفاصيل واضغط على الزر لبدء الجلب.'),
-          ],
-        ),
+              ),
+            );
+          }
+
+          // 3. حالة نجاح جلب البيانات
+          if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+            return ListView.builder(
+              itemCount: snapshot.data!.length,
+              itemBuilder: (context, index) {
+                final item = snapshot.data![index];
+                return ListTile(
+                  title: Text(item['title'] ?? 'بدون عنوان'),
+                  subtitle: Text(item.toString()),
+                );
+              },
+            );
+          }
+
+          return const Center(
+            child: Text('لا توجد بيانات للعرض'),
+          );
+        },
       ),
     );
   }
